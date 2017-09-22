@@ -1,20 +1,53 @@
-import RPi.GPIO as GPIO
 import time
 import datetime
 
+try:
+	import RPi.GPIO as GPIO
+except ImportError as e:
+	class GPIO(object):
+		OUT = "out"
+		BCM = "bcm"
 
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(22, GPIO.OUT)
+		@classmethod
+		def setmode(cls, mode):
+			print "%s.setmode('%s')" % (cls.__name__, mode)
 
-while True:
-	print "on"
-	GPIO.output(22, True)
-	time.sleep(3)
-	print "off"
-	GPIO.output(22, False)
-	time.sleep(3)
+		@classmethod
+		def setup(cls, pin, mode):
+			print "%s.setup(%s, '%s')" % (cls.__name__, pin, mode)
+
+		@classmethod
+		def output(cls, pin, value):
+			print "%s.output('%s', %s)" % (cls.__name__, pin, value)
+
+		@classmethod
+		def cleanup(cls):
+			print "%s.cleanup()" % cls.__name__
 
 
+class Loggable(object):
+	def log(self, message):
+		print "[%s][%s] %s\n" % (datetime.datetime.now(), self.__class__.__name__, message)
+
+class PinManager(Loggable):
+	MODE_OUT = GPIO.OUT
+
+	@classmethod
+	def initalize(cls):
+		GPIO.setmode(GPIO.BCM)
+
+	@classmethod
+	def setup_pin(cls, pin, mode):
+		GPIO.setup(pin, mode)
+
+	@classmethod
+	def write_pin(cls, pin, value):
+		print "write_pin('%s', '%s')" % (pin, value)
+		GPIO.output(pin, value)
+
+	@classmethod
+	def cleanup(self):
+		GPIO.cleanup()
 
 class TickerTickTooManyError(Exception):
 	pass
@@ -23,10 +56,6 @@ class TickerIncrementedEvent(Exception):
 	def __init__(self, remaining):
 		self.ticks_remaining = remaining
 		super(TickerIncrementedEvent, self).__init__("Ticks remaining: %s" % remaining)
-
-class Loggable(object):
-	def log(self, message):
-		print "[%s][%s] %s\n" % (datetime.datetime.now(), self.__class__.__name__, message)
 
 class TickerCounter(Loggable):
 	def __init__(self):
@@ -89,10 +118,13 @@ class FeedSchedule(Loggable):
 		self.next_time = feed_time
 
 class CatFeeder(Loggable):
+	MOTOR_PIN = 22
+
 	def __init__(self, scheduled_feeds):
 		self.scheduled_feeds = scheduled_feeds
 		self.current_feed = None
 		self.ticker = TickerCounter()
+		PinManager.setup_pin(self.MOTOR_PIN, PinManager.MODE_OUT)
 
 	def update(self):
 		if not self.is_feeding:
@@ -116,11 +148,13 @@ class CatFeeder(Loggable):
 		self.log("start feeding: %s" % scheduled_feed.next_time)
 		self.current_feed = scheduled_feed
 		self.ticker.count_from(scheduled_feed.duration)
+		PinManager.write_pin(self.MOTOR_PIN, True)
 
 	def stop_feeding(self):
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
 		self.current_feed = None
+		PinManager.write_pin(self.MOTOR_PIN, False)
 
 now = datetime.datetime.now()
 
@@ -132,10 +166,17 @@ schedule = [
 	FeedSchedule(second_time.hour, second_time.minute, second_time.second, 3)
 ]
 
+PinManager.initalize()
 cat_feeder = CatFeeder(schedule)
 
-while True:
-	cat_feeder.update() 
-	time.sleep(1)
+try:
+	while True:
+		cat_feeder.update() 
+		time.sleep(1)
+except Exception as e:
+	print e
+
+PinManager.cleanup()
+
 
 

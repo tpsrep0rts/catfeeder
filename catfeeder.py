@@ -1,5 +1,20 @@
+import RPi.GPIO as GPIO
 import time
 import datetime
+
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(22, GPIO.OUT)
+
+while True:
+	print "on"
+	GPIO.output(22, True)
+	time.sleep(3)
+	print "off"
+	GPIO.output(22, False)
+	time.sleep(3)
+
+
 
 class TickerTickTooManyError(Exception):
 	pass

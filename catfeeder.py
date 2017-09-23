@@ -1,12 +1,17 @@
 import time
 import datetime
 
+from twitter.oauth import OAuth
+from twitter.api import Twitter
+import os
+
 try:
 	import RPi.GPIO as GPIO
 except ImportError as e:
 	print e
 	class GPIO(object):
 		OUT = "out"
+		IN = "in"
 		BCM = "bcm"
 
 		@classmethod
@@ -20,6 +25,10 @@ except ImportError as e:
 		@classmethod
 		def output(cls, pin, value):
 			print "%s.output('%s', %s)" % (cls.__name__, pin, value)
+
+		@classmethod
+		def input(cls, pin):
+			return 0
 
 		@classmethod
 		def cleanup(cls):
@@ -133,6 +142,22 @@ class FeedSchedule(Loggable):
 
 		self.next_time = feed_time
 
+class CatFeederTwitter(Loggable):
+	def __init__(self):
+		twitter_api_key = os.environ.get('TWITTER_API_KEY')
+		twitter_api_secret= os.environ.get('TWITTER_API_SECRET')
+		twitter_access_token = os.environ.get('TWITTER_ACCESS_TOKEN')
+		twitter_access_token_secret= os.environ.get('TWITTER_ACCESS_TOKEN_SECRET')
+
+		oauth = OAuth(twitter_access_token, 
+			twitter_access_token_secret, 
+			twitter_api_key, 
+			twitter_api_secret)
+		self.twitter = Twitter(auth=oauth)
+
+	def post_feeding_success(self, schedule):
+		twitter.statuses.update(status='Scarf was fed %s units.' % schedule.duration)
+
 class CatFeeder(Loggable):
 	MOTOR_PIN = 22
 
@@ -141,6 +166,7 @@ class CatFeeder(Loggable):
 		self.current_feed = None
 		self.ticker = TickerCounter()
 		PinManager.setup_pin(self.MOTOR_PIN, GPIO.OUT)
+		self.twitter = CatFeederTwitter()
 
 	def update(self):
 		if not self.is_feeding:
@@ -167,6 +193,7 @@ class CatFeeder(Loggable):
 		PinManager.write_pin(self.MOTOR_PIN, True)
 
 	def stop_feeding(self):
+		self.twitter.post_feeding_success(self.current_feed)
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
 		self.current_feed = None
@@ -178,14 +205,16 @@ first_time = now + datetime.timedelta(seconds=2)
 second_time = now + datetime.timedelta(seconds=60)
 
 schedule = [
-	FeedSchedule(20, 55, 0, 3),
-	FeedSchedule(20, 56, 0, 3),
-	FeedSchedule(20, 57, 0, 3),
+	FeedSchedule(19, 0, 0, 3), # 8 AM PST
+	FeedSchedule(1, 0, 0, 3) # 6 PM PST
 ]
 
 PinManager.initalize()
 cat_feeder = CatFeeder(schedule)
 
+catfeeder_twitter = CatFeederTwitter()
+catfeeder_twitter.post_feeding_success(schedule[0])
+exit()
 try:
 	while True:
 		cat_feeder.update() 

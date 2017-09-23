@@ -178,8 +178,8 @@ first_time = now + datetime.timedelta(seconds=2)
 second_time = now + datetime.timedelta(seconds=60)
 
 schedule = [
-	FeedSchedule(first_time.hour, first_time.minute, first_time.second, 3),
-	FeedSchedule(second_time.hour, second_time.minute, second_time.second, 3)
+	FeedSchedule(20, 51, 0, 3),
+	FeedSchedule(20, 52, 0, 3),
 ]
 
 PinManager.initalize()

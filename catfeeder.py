@@ -4,6 +4,7 @@ import datetime
 try:
 	import RPi.GPIO as GPIO
 except ImportError as e:
+	print e
 	class GPIO(object):
 		OUT = "out"
 		BCM = "bcm"
@@ -24,29 +25,40 @@ except ImportError as e:
 		def cleanup(cls):
 			print "%s.cleanup()" % cls.__name__
 
-
+SLEEP_INTERVAL = 0.1
 class Loggable(object):
-	def log(self, message):
-		print "[%s][%s] %s\n" % (datetime.datetime.now(), self.__class__.__name__, message)
+	@classmethod
+	def log(cls, message):
+		print "[%s][%s] %s\n" % (datetime.datetime.now(), cls.__name__, message)
 
 class PinManager(Loggable):
 	MODE_OUT = GPIO.OUT
+	MODE_IN = GPIO.IN
 
 	@classmethod
 	def initalize(cls):
+		cls.log('initializing')
 		GPIO.setmode(GPIO.BCM)
 
 	@classmethod
 	def setup_pin(cls, pin, mode):
+		cls.log('setup pin %s, %s' % (pin, mode))
 		GPIO.setup(pin, mode)
 
 	@classmethod
 	def write_pin(cls, pin, value):
-		print "write_pin('%s', '%s')" % (pin, value)
+		cls.log("write_pin('%s', %s)" % (pin, value))
 		GPIO.output(pin, value)
+	
+	@classmethod
+	def read_pin(cls, pin):
+		value = GPIO.input(pin)
+		print "Read Pin(%s) = %s" % (pin, value)
+		return True if value else False
 
 	@classmethod
-	def cleanup(self):
+	def cleanup(cls):
+		cls.log('cleanup')
 		GPIO.cleanup()
 
 class TickerTickTooManyError(Exception):
@@ -58,19 +70,23 @@ class TickerIncrementedEvent(Exception):
 		super(TickerIncrementedEvent, self).__init__("Ticks remaining: %s" % remaining)
 
 class TickerCounter(Loggable):
+	TICKER_PIN = 5
+
 	def __init__(self):
-		self.activated = False #make this read from pin
 		self.ticks_remaining = 0
+		PinManager.setup_pin(self.TICKER_PIN, GPIO.IN)
+		self.activated = self.read_state()
 
 	def read_state(self):
-		return not self.activated #make this read from pin
+		return PinManager.read_pin(self.TICKER_PIN)
 
 	def update(self):
+		ticker_activated = self.read_state()
 		if self.activated:
-			if not self.read_state():
+			if not ticker_activated:
 				self.on_ticker_deactivated()
 		else:
-			if self.read_state():
+			if ticker_activated:
 				self.on_ticker_activated()
 
 	def on_ticker_activated(self):
@@ -124,7 +140,7 @@ class CatFeeder(Loggable):
 		self.scheduled_feeds = scheduled_feeds
 		self.current_feed = None
 		self.ticker = TickerCounter()
-		PinManager.setup_pin(self.MOTOR_PIN, PinManager.MODE_OUT)
+		PinManager.setup_pin(self.MOTOR_PIN, GPIO.OUT)
 
 	def update(self):
 		if not self.is_feeding:
@@ -158,8 +174,8 @@ class CatFeeder(Loggable):
 
 now = datetime.datetime.now()
 
-first_time = now + datetime.timedelta(seconds=5)
-second_time = now + datetime.timedelta(seconds=30)
+first_time = now + datetime.timedelta(seconds=2)
+second_time = now + datetime.timedelta(seconds=60)
 
 schedule = [
 	FeedSchedule(first_time.hour, first_time.minute, first_time.second, 3),
@@ -172,11 +188,12 @@ cat_feeder = CatFeeder(schedule)
 try:
 	while True:
 		cat_feeder.update() 
-		time.sleep(1)
+		time.sleep(SLEEP_INTERVAL)
 except Exception as e:
 	print e
-
-PinManager.cleanup()
+finally:
+	PinManager.write_pin(CatFeeder.MOTOR_PIN, False)
+	PinManager.cleanup()
 
 
 

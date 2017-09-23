@@ -35,6 +35,7 @@ except ImportError as e:
 			print "%s.cleanup()" % cls.__name__
 
 SLEEP_INTERVAL = 0.1
+
 class Loggable(object):
 	@classmethod
 	def log(cls, message):
@@ -150,13 +151,17 @@ class CatFeederTwitter(Loggable):
 		twitter_access_token_secret= os.environ.get('TWITTER_ACCESS_TOKEN_SECRET')
 
 		oauth = OAuth(twitter_access_token, 
-			twitter_access_token_secret, 
-			twitter_api_key, 
-			twitter_api_secret)
+				twitter_access_token_secret, 
+				twitter_api_key, 
+				twitter_api_secret)
 		self.twitter = Twitter(auth=oauth)
 
-	def post_feeding_success(self, schedule):
-		twitter.statuses.update(status='Scarf was fed %s units.' % schedule.duration)
+	def post_feeding_success(self, scheduled_feed):
+		self.twitter.statuses.update(status='Scarf was fed %s units.' % scheduled_feed.duration)
+
+	def post_started(self, scheduled_feeds):
+		schedule = ["%s:%s:%s" % (scheduled_feed.hour, scheduled_feed.minute, scheduled_feed.second) for scheduled_feed in scheduled_feeds]
+		self.twitter.statuses.update(status="Startup! Schedule=%s" % schedule)
 
 class CatFeeder(Loggable):
 	MOTOR_PIN = 22
@@ -167,6 +172,7 @@ class CatFeeder(Loggable):
 		self.ticker = TickerCounter()
 		PinManager.setup_pin(self.MOTOR_PIN, GPIO.OUT)
 		self.twitter = CatFeederTwitter()
+		self.twitter.post_started(scheduled_feeds)
 
 	def update(self):
 		if not self.is_feeding:
@@ -212,9 +218,6 @@ schedule = [
 PinManager.initalize()
 cat_feeder = CatFeeder(schedule)
 
-catfeeder_twitter = CatFeederTwitter()
-catfeeder_twitter.post_feeding_success(schedule[0])
-exit()
 try:
 	while True:
 		cat_feeder.update() 

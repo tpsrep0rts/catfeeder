@@ -157,11 +157,11 @@ class CatFeederTwitter(Loggable):
 		self.twitter = Twitter(auth=oauth)
 
 	def post_feeding_success(self, scheduled_feed):
-		self.twitter.statuses.update(status='Scarf was fed %s units.' % scheduled_feed.duration)
+		self.twitter.statuses.update(status='[%s] Scarf was fed %s units.' % (datetime.datetime.now(), scheduled_feed.duration))
 
 	def post_started(self, scheduled_feeds):
 		schedule = ["%s:%s:%s" % (scheduled_feed.hour, scheduled_feed.minute, scheduled_feed.second) for scheduled_feed in scheduled_feeds]
-		self.twitter.statuses.update(status="Startup! Schedule=%s" % schedule)
+		self.twitter.statuses.update(status="[%s] Startup! Schedule=%s" % (datetime.datetime.now(), schedule))
 
 class CatFeeder(Loggable):
 	MOTOR_PIN = 22

@@ -1,6 +1,8 @@
+import base64
 import time
 import datetime
 
+import tweepy
 from twitter.oauth import OAuth
 from twitter.api import Twitter
 import os
@@ -36,10 +38,18 @@ except ImportError as e:
 
 SLEEP_INTERVAL = 0.1
 
+
 class Loggable(object):
 	@classmethod
 	def log(cls, message):
 		print "[%s][%s] %s\n" % (datetime.datetime.now(), cls.__name__, message)
+
+class Camera(Loggable):
+	@classmethod
+	def capture(self):
+		filename = "/home/pi/webcam/%s.jpg" % datetime.datetime.now()
+		os.system('fswebcam "%s"' % filename)
+		return filename
 
 class PinManager(Loggable):
 	MODE_OUT = GPIO.OUT
@@ -149,19 +159,17 @@ class CatFeederTwitter(Loggable):
 		twitter_api_secret= os.environ.get('TWITTER_API_SECRET')
 		twitter_access_token = os.environ.get('TWITTER_ACCESS_TOKEN')
 		twitter_access_token_secret= os.environ.get('TWITTER_ACCESS_TOKEN_SECRET')
-
-		oauth = OAuth(twitter_access_token, 
-				twitter_access_token_secret, 
-				twitter_api_key, 
-				twitter_api_secret)
-		self.twitter = Twitter(auth=oauth)
+		auth = tweepy.OAuthHandler(twitter_api_key, twitter_api_secret)
+		auth.set_access_token(twitter_access_token, twitter_access_token_secret)
+		self.tweepy = tweepy.API(auth)
 
 	def post_feeding_success(self, scheduled_feed):
-		self.twitter.statuses.update(status='[%s] Scarf was fed %s units.' % (datetime.datetime.now(), scheduled_feed.duration))
+		filename = Camera.capture()
+		self.tweepy.update_with_media(filename, status='[%s] Scarf was fed %s units.' % (datetime.datetime.now(), scheduled_feed.duration))
 
 	def post_started(self, scheduled_feeds):
 		schedule = ["%s:%s:%s" % (scheduled_feed.hour, scheduled_feed.minute, scheduled_feed.second) for scheduled_feed in scheduled_feeds]
-		self.twitter.statuses.update(status="[%s] Startup! Schedule=%s" % (datetime.datetime.now(), schedule))
+		self.tweepy.update_status(status="[%s] Startup! Schedule=%s" % (datetime.datetime.now(), schedule))
 
 class CatFeeder(Loggable):
 	MOTOR_PIN = 22
@@ -178,7 +186,7 @@ class CatFeeder(Loggable):
 		if not self.is_feeding:
 			for scheduled_feed in self.scheduled_feeds:
 				if scheduled_feed.next_time <= datetime.datetime.now():
-					self.start_feeding(scheduled_feed)
+					self.on_start_feeding(scheduled_feed)
 					break
 
 		if self.is_feeding:
@@ -186,24 +194,26 @@ class CatFeeder(Loggable):
 				self.ticker.update()
 			except TickerIncrementedEvent as e:
 				if e.ticks_remaining == 0:
-					self.stop_feeding()
+					self.on_stop_feeding()
 
 	@property
 	def is_feeding(self):
 		return self.current_feed is not None
 
-	def start_feeding(self, scheduled_feed):
+	def on_start_feeding(self, scheduled_feed):
 		self.log("start feeding: %s" % scheduled_feed.next_time)
 		self.current_feed = scheduled_feed
 		self.ticker.count_from(scheduled_feed.duration)
 		PinManager.write_pin(self.MOTOR_PIN, True)
 
-	def stop_feeding(self):
-		self.twitter.post_feeding_success(self.current_feed)
+	def on_stop_feeding(self):
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
 		self.current_feed = None
 		PinManager.write_pin(self.MOTOR_PIN, False)
+		sleep(10)
+		self.twitter.post_picture(self.current_feed)
+
 
 now = datetime.datetime.now()
 

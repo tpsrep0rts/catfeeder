@@ -223,7 +223,7 @@ second_time = now + datetime.timedelta(seconds=60)
 schedule = [
 	FeedSchedule(19, 0, 0, 3), # 8 AM PST
 	FeedSchedule(1, 0, 0, 3), # 6 PM PST
-	FeedSchedule(21, 50, 0, 3) # 10:50 AM PST
+	FeedSchedule(21, 53, 0, 3) # 10:50 AM PST
 ]
 
 PinManager.initalize()

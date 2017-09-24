@@ -210,9 +210,9 @@ class CatFeeder(Loggable):
 		PinManager.write_pin(self.MOTOR_PIN, False)
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
-		self.current_feed = None
 		time.sleep(10)
 		self.twitter.post_feeding_success(self.current_feed)
+		self.current_feed = None
 
 
 now = datetime.datetime.now()
@@ -222,8 +222,7 @@ second_time = now + datetime.timedelta(seconds=60)
 
 schedule = [
 	FeedSchedule(15, 0, 0, 3), # 8 AM PST
-	FeedSchedule(1, 0, 0, 3), # 6 PM PST
-	FeedSchedule(18, 9, 0, 3) # 10:50 AM PST
+	FeedSchedule(1, 0, 0, 3) # 6 PM PST
 ]
 
 PinManager.initalize()

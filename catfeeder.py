@@ -201,16 +201,16 @@ class CatFeeder(Loggable):
 		return self.current_feed is not None
 
 	def on_start_feeding(self, scheduled_feed):
+		PinManager.write_pin(self.MOTOR_PIN, True)
 		self.log("start feeding: %s" % scheduled_feed.next_time)
 		self.current_feed = scheduled_feed
 		self.ticker.count_from(scheduled_feed.duration)
-		PinManager.write_pin(self.MOTOR_PIN, True)
 
 	def on_stop_feeding(self):
+		PinManager.write_pin(self.MOTOR_PIN, False)
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
 		self.current_feed = None
-		PinManager.write_pin(self.MOTOR_PIN, False)
 		sleep(10)
 		self.twitter.post_picture(self.current_feed)
 
@@ -222,7 +222,8 @@ second_time = now + datetime.timedelta(seconds=60)
 
 schedule = [
 	FeedSchedule(19, 0, 0, 3), # 8 AM PST
-	FeedSchedule(1, 0, 0, 3) # 6 PM PST
+	FeedSchedule(1, 0, 0, 3), # 6 PM PST
+	FeedSchedule(21, 50, 0, 3) # 10:50 AM PST
 ]
 
 PinManager.initalize()

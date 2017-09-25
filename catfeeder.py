@@ -3,8 +3,6 @@ import time
 import datetime
 
 import tweepy
-from twitter.oauth import OAuth
-from twitter.api import Twitter
 import os
 
 try:
@@ -36,53 +34,46 @@ except ImportError as e:
 		def cleanup(cls):
 			print "%s.cleanup()" % cls.__name__
 
-SLEEP_INTERVAL = 0.1
+class CameraFailedException(Exception):
+	pass
 
+class TickerTickTooManyError(Exception):
+	pass
 
 class Loggable(object):
 	@classmethod
 	def log(cls, message):
 		print "[%s][%s] %s\n" % (datetime.datetime.now(), cls.__name__, message)
 
-class Camera(Loggable):
 	@classmethod
-	def capture(self):
-		filename = "/home/pi/webcam/%s.jpg" % datetime.datetime.now()
-		os.system('fswebcam "%s"' % filename)
-		return filename
+	def log_error(cls, message):
+		print "[%s][%s] ERROR: %s\n" % (datetime.datetime.now(), cls.__name__, message)
 
 class PinManager(Loggable):
 	MODE_OUT = GPIO.OUT
 	MODE_IN = GPIO.IN
 
-	@classmethod
-	def initalize(cls):
-		cls.log('initializing')
-		GPIO.setmode(GPIO.BCM)
+	def __init__(self, gpio):
+		self.log('initializing')
+		self.gpio = gpio
+		self.gpio.setmode(self.gpio.BCM)
 
-	@classmethod
-	def setup_pin(cls, pin, mode):
-		cls.log('setup pin %s, %s' % (pin, mode))
-		GPIO.setup(pin, mode)
+	def setup_pin(self, pin, mode):
+		self.log('setup pin %s, %s' % (pin, mode))
+		self.gpio.setup(pin, mode)
 
-	@classmethod
-	def write_pin(cls, pin, value):
-		cls.log("write_pin('%s', %s)" % (pin, value))
-		GPIO.output(pin, value)
+	def write_pin(self, pin, value):
+		self.log("write_pin('%s', %s)" % (pin, value))
+		self.gpio.output(pin, value)
 	
-	@classmethod
-	def read_pin(cls, pin):
-		value = GPIO.input(pin)
-		print "Read Pin(%s) = %s" % (pin, value)
+	def read_pin(self, pin):
+		value = self.gpio.input(pin)
+		self.log("Read Pin(%s) = %s" % (pin, value))
 		return True if value else False
 
-	@classmethod
-	def cleanup(cls):
-		cls.log('cleanup')
-		GPIO.cleanup()
-
-class TickerTickTooManyError(Exception):
-	pass
+	def cleanup(self):
+		self.log('cleanup')
+		self.gpio.cleanup()
 
 class TickerIncrementedEvent(Exception):
 	def __init__(self, remaining):
@@ -90,15 +81,15 @@ class TickerIncrementedEvent(Exception):
 		super(TickerIncrementedEvent, self).__init__("Ticks remaining: %s" % remaining)
 
 class TickerCounter(Loggable):
-	TICKER_PIN = 5
-
-	def __init__(self):
+	def __init__(self, ticker_pin, pin_manager):
+		self.pin_manager = pin_manager
+		self.ticker_pin = ticker_pin
 		self.ticks_remaining = 0
-		PinManager.setup_pin(self.TICKER_PIN, GPIO.IN)
+		self.pin_manager.setup_pin(self.ticker_pin, PinManager.MODE_IN)
 		self.activated = self.read_state()
 
 	def read_state(self):
-		return PinManager.read_pin(self.TICKER_PIN)
+		return self.pin_manager.read_pin(self.ticker_pin)
 
 	def update(self):
 		ticker_activated = self.read_state()
@@ -153,8 +144,40 @@ class FeedSchedule(Loggable):
 
 		self.next_time = feed_time
 
+class Camera(Loggable):
+	def __init__(self, flash_pin, pin_manager, output_directory):
+		self.flash_pin = flash_pin
+		self.pin_manager = pin_manager
+		self.output_directory = output_directory
+		self.pin_manager.setup_pin(self.flash_pin, GPIO.OUT)
+		
+	def capture(self, use_flash=True):
+		if use_flash:
+			self.pin_manager.write_pin(self.flash_pin, True)
+			self.log("Flash Started")
+
+		self.log("Capture image")
+		filename = "%s/%s.jpg" % (self.output_directory, datetime.datetime.now())
+		os.system('fswebcam "%s"' % filename)
+
+		if use_flash:
+			self.pin_manager.write_pin(self.flash_pin, False)
+			self.log("Flash Stopped")
+
+		if not os.path.isfile(filename):
+			raise CameraFailedException()
+
+		return filename
+
+	def cleanup(self):
+		self.pin_manager.write_pin(self.flash_pin, False)
+
 class CatFeederTwitter(Loggable):
-	def __init__(self):
+	def __init__(self, camera, tweet_at, debug=False):
+		self.camera = camera
+		self.debug = debug
+		self.tweet_at = tweet_at
+
 		twitter_api_key = os.environ.get('TWITTER_API_KEY')
 		twitter_api_secret= os.environ.get('TWITTER_API_SECRET')
 		twitter_access_token = os.environ.get('TWITTER_ACCESS_TOKEN')
@@ -163,24 +186,60 @@ class CatFeederTwitter(Loggable):
 		auth.set_access_token(twitter_access_token, twitter_access_token_secret)
 		self.tweepy = tweepy.API(auth)
 
-	def post_feeding_success(self, scheduled_feed):
-		filename = Camera.capture()
-		self.tweepy.update_with_media(filename, status='[%s] Scarf was fed %s units.' % (datetime.datetime.now(), scheduled_feed.duration))
+	def update_status(self, message, take_picture=False):
+		if take_picture:
+			try:
+				filename = self.camera.capture()
+			except CameraFailedException as e:
+				filename = None
 
-	def post_started(self, scheduled_feeds):
-		schedule = ["%s:%s:%s" % (scheduled_feed.hour, scheduled_feed.minute, scheduled_feed.second) for scheduled_feed in scheduled_feeds]
-		self.tweepy.update_status(status="[%s] Startup! Schedule=%s" % (datetime.datetime.now(), schedule))
+			if not filename:
+				self.log_error("Failed to caputure picture")
+				return self.update_status(message, False)
+
+			self.tweepy.update_with_media(filename, status=self.format_message(message))
+		else:
+			self.tweepy.update_status(status=self.format_message(message))
+
+	def format_message(self, message, debug=False):
+		if self.debug == True:
+			message = "[DEBUG] %s" % message
+
+		message = "%s @%s" % (message, self.tweet_at)
+		return message
+
+class CatFeederMotor(Loggable):
+	def __init__(self, motor_pin, pin_manager):
+		self.motor_pin = motor_pin
+		self.pin_manager = pin_manager
+		self.pin_manager.setup_pin(self.motor_pin, GPIO.OUT)
+
+	def start_motor(self):
+		self.pin_manager.write_pin(self.motor_pin, True)
+
+	def stop_motor(self):
+		self.pin_manager.write_pin(self.motor_pin, False)
+
+	def cleanup(self):
+		self.pin_manager.write_pin(self.motor_pin, False)
 
 class CatFeeder(Loggable):
-	MOTOR_PIN = 22
-
-	def __init__(self, scheduled_feeds):
+	def __init__(self, motor, ticker, twitter, scheduled_feeds):
+		self.motor = motor
+		self.twitter = twitter
+		self.ticker = ticker
 		self.scheduled_feeds = scheduled_feeds
+
 		self.current_feed = None
-		self.ticker = TickerCounter()
-		PinManager.setup_pin(self.MOTOR_PIN, GPIO.OUT)
-		self.twitter = CatFeederTwitter()
-		self.twitter.post_started(scheduled_feeds)
+		self.post_started_to_twitter()
+
+	def post_started_to_twitter(self):
+		schedule = ["%s:%s:%s" % (scheduled_feed.hour, scheduled_feed.minute, scheduled_feed.second) for scheduled_feed in self.scheduled_feeds]
+		self.twitter.update_status("[%s] Startup! Schedule=%s" % (datetime.datetime.now(), schedule))
+
+	def post_feeding_success_to_twitter(self, scheduled_feed):
+		self.twitter.update_status('[%s] Scarf was fed %s units.' % (datetime.datetime.now(), scheduled_feed.duration), True)
+
 
 	def update(self):
 		if not self.is_feeding:
@@ -201,42 +260,80 @@ class CatFeeder(Loggable):
 		return self.current_feed is not None
 
 	def on_start_feeding(self, scheduled_feed):
-		PinManager.write_pin(self.MOTOR_PIN, True)
 		self.log("start feeding: %s" % scheduled_feed.next_time)
 		self.current_feed = scheduled_feed
 		self.ticker.count_from(scheduled_feed.duration)
 
 	def on_stop_feeding(self):
-		PinManager.write_pin(self.MOTOR_PIN, False)
 		self.current_feed.calculate_next_time()
 		self.log("stop feeding. next scheduled: %s" % self.current_feed.next_time)
 		time.sleep(10)
-		self.twitter.post_feeding_success(self.current_feed)
+		self.post_feeding_success_to_twitter(self.current_feed)
 		self.current_feed = None
 
+tweet_at = 'tpsreporting'
+DEBUG = True
+sleep_interval = 0.1
+motor_pin = 22
+camera_flash_pin = 6
+ticker_pin = 5
 
-now = datetime.datetime.now()
+pin_manager = PinManager(GPIO)
+motor = CatFeederMotor(motor_pin, pin_manager)
+ticker = TickerCounter(ticker_pin, pin_manager)
+camera = Camera(camera_flash_pin, pin_manager, "/home/pi/webcam/")
+twitter = CatFeederTwitter(camera, tweet_at, DEBUG)
 
-first_time = now + datetime.timedelta(seconds=2)
-second_time = now + datetime.timedelta(seconds=60)
+if not DEBUG:
+	scheduled_feeds = [
+		FeedSchedule(15, 0, 0, 3), # 8 AM PST
+		FeedSchedule(1, 0, 0, 3) # 6 PM PST
+	]
+else:
+	now = datetime.datetime.now()
+	first_time = now + datetime.timedelta(seconds=2)
+	second_time = now + datetime.timedelta(seconds=60)
+	scheduled_feeds = [
+		FeedSchedule(first_time.hour, first_time.minute, first_time.second, 3), # 8 AM PST
+		FeedSchedule(second_time.hour, second_time.minute, second_time.second, 3) # 6 PM PST
+	]
+	class DebugTickerCounter(TickerCounter):
+		def __init__(self, ticker_pin, pin_manager):
+			self.pin_manager = pin_manager
+			self.ticker_pin = ticker_pin
+			self.ticks_remaining = 0
+			self.activated = False
 
-schedule = [
-	FeedSchedule(15, 0, 0, 3), # 8 AM PST
-	FeedSchedule(1, 0, 0, 3) # 6 PM PST
-]
+			self.frequency = 1
+			self.last_tick = None
+			self.last_state = False
 
-PinManager.initalize()
-cat_feeder = CatFeeder(schedule)
+		def read_state(self):
+			now = datetime.datetime.now()
+			if self.last_tick is None:
+				self.last_tick = now
+
+			if now > self.last_tick + datetime.timedelta(seconds=self.frequency):
+				self.last_tick = now
+				self.last_state = not self.last_state
+
+			return self.last_state
+
+	ticker = DebugTickerCounter(ticker_pin, pin_manager)
+
+cat_feeder = CatFeeder(motor, ticker, twitter, scheduled_feeds)
 
 try:
 	while True:
 		cat_feeder.update() 
-		time.sleep(SLEEP_INTERVAL)
-except Exception as e:
-	print e
+		time.sleep(sleep_interval)
+
+except KeyboardInterrupt as e:
+	pass
 finally:
-	PinManager.write_pin(CatFeeder.MOTOR_PIN, False)
-	PinManager.cleanup()
+	pin_manager.cleanup()
+	motor.cleanup()
+	camera.cleanup()
 
 
 

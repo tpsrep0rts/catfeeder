@@ -278,6 +278,7 @@ sleep_interval = 0.1
 motor_pin = 22
 camera_flash_pin = 6
 ticker_pin = 5
+serving_size = 5
 
 pin_manager = PinManager(GPIO)
 motor = CatFeederMotor(motor_pin, pin_manager)
@@ -287,16 +288,16 @@ twitter = CatFeederTwitter(camera, tweet_at, DEBUG)
 
 if not DEBUG:
 	scheduled_feeds = [
-		FeedSchedule(15, 0, 0, 3), # 8 AM PST
-		FeedSchedule(1, 0, 0, 3) # 6 PM PST
+		FeedSchedule(15, 0, 0, serving_size), # 8 AM PST
+		FeedSchedule(1, 0, 0, serving_size) # 6 PM PST
 	]
 else:
 	now = datetime.datetime.now()
 	first_time = now + datetime.timedelta(seconds=2)
 	second_time = now + datetime.timedelta(seconds=60)
 	scheduled_feeds = [
-		FeedSchedule(first_time.hour, first_time.minute, first_time.second, 3), # 8 AM PST
-		FeedSchedule(second_time.hour, second_time.minute, second_time.second, 3) # 6 PM PST
+		FeedSchedule(first_time.hour, first_time.minute, first_time.second, serving_size), # 8 AM PST
+		FeedSchedule(second_time.hour, second_time.minute, second_time.second, serving_size) # 6 PM PST
 	]
 	class DebugTickerCounter(TickerCounter):
 		def __init__(self, ticker_pin, pin_manager):

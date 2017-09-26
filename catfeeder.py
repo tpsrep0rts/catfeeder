@@ -5,9 +5,11 @@ import datetime
 import tweepy
 import os
 
+DEBUG = False
 try:
 	import RPi.GPIO as GPIO
 except ImportError as e:
+	DEBUG = True
 	print e
 	class GPIO(object):
 		OUT = "out"
@@ -272,7 +274,6 @@ class CatFeeder(Loggable):
 		self.current_feed = None
 
 tweet_at = 'tpsreporting'
-DEBUG = True
 sleep_interval = 0.1
 motor_pin = 22
 camera_flash_pin = 6

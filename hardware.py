@@ -75,11 +75,6 @@ class CatFeederMotor(Loggable):
 class TickerTickTooManyError(Exception):
 	pass
 
-class TickerIncrementedEvent(Exception):
-	def __init__(self, remaining):
-		self.ticks_remaining = remaining
-		super(TickerIncrementedEvent, self).__init__("Ticks remaining: %s" % remaining)
-
 class TickerCounter(Loggable):
 	def __init__(self, ticker_pin, pin_manager):
 		self.pin_manager = pin_manager
@@ -108,7 +103,6 @@ class TickerCounter(Loggable):
 		self.activated = False
 		self.log("ticker deactivated")
 		self.increment_ticker()
-		raise TickerIncrementedEvent(self.ticks_remaining) #communicate the tick
 
 	def increment_ticker(self):
 		if self.ticks_remaining == 0:
@@ -156,6 +150,7 @@ class CatFeeder(Loggable):
 		self.motor = motor
 		self.twitter = twitter
 		self.ticker = ticker
+
 		self.scheduled_feeds = scheduled_feeds
 		self.sleep_interval = sleep_interval
 
@@ -172,18 +167,23 @@ class CatFeeder(Loggable):
 			time.sleep(self.sleep_interval)
 
 	def update(self):
+		self.start_if_scheduled()
+		if self.is_feeding:
+			self.ticker.update()
+
+		self.stop_feeding_if_done()
+
+	def start_if_scheduled(self):
 		if not self.is_feeding:
 			for scheduled_feed in self.scheduled_feeds:
 				if scheduled_feed.next_time <= datetime.datetime.now():
 					self.on_start_feeding(scheduled_feed)
 					break
 
+	def stop_feeding_if_done(self):
 		if self.is_feeding:
-			try:
-				self.ticker.update()
-			except TickerIncrementedEvent as e:
-				if e.ticks_remaining == 0:
-					self.on_stop_feeding()
+			if self.ticker.ticks_remaining == 0:
+				self.on_stop_feeding()
 
 	@property
 	def is_feeding(self):

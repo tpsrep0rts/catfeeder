@@ -32,14 +32,12 @@ else:
 	]
 	class DebugTickerCounter(TickerCounter):
 		def __init__(self, ticker_pin, pin_manager):
-			self.pin_manager = pin_manager
-			self.ticker_pin = ticker_pin
+			self.last_tick = None
+			self.frequency = 1
+			self.last_state =False
+			super(DebugTickerCounter, self).__init__(ticker_pin, pin_manager)
 			self.ticks_remaining = 0
 			self.activated = False
-
-			self.frequency = 1
-			self.last_tick = None
-			self.last_state = False
 
 		def read_state(self):
 			now = datetime.datetime.now()
